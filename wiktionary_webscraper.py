@@ -53,13 +53,13 @@ done = 0
 count = 0
 mutex = threading.Lock() # For writing to file
 max_pages = 1000000 # used for testing, lower if you only want first x pages of words
-debug_filename = "wiktionary_" + str(datetime.now().time()) + ".dump"
+debug_filename = "wiktionary_webscraper_" + str(datetime.now().time()) + ".dump"
 
 def download_page(url):
     response = requests.get(url)
     return response
 
-print(bcolors.HEADER + "Wiktionary Scraper" + bcolors.ENDC)
+print(bcolors.HEADER + __file__ + bcolors.ENDC)
 
 # These should all be functions but aren't, main starts here basically
 
