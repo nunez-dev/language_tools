@@ -83,7 +83,7 @@ page = False
 while(not page):
     
     language = str.capitalize(input("What language? "))
-    pos = str.lower(input("What pos? "))
+    pos = str.lower(input("What part of speech/lemma?\n(see %s_lemmas ) " % (words_url + language)))
 
     global_words_url = words_url + language + '_' + pos
     print(global_words_url + '\n')
@@ -157,7 +157,7 @@ while(not done):
     else:
         url_params = '&' + np['href'].split("&", 1)[1] # we are only interested in after the &
     # Example : href="/w/index.php?title=Category:Spanish_verbs&pagefrom=ACITRONAR%0Aacitronar#mw-pages"
-    #time.sleep(0)
+    #time.sleep(1)
     if ( count == max_pages ):
         done = 1
     count += 1
@@ -287,7 +287,7 @@ def get_definition(num, words, mutex):
         with mutex:
             with open(filename, 'a', encoding='utf-8') as file:
                 file.write(line + '\n')
-        time.sleep(1)
+        #time.sleep(1)
     print(bcolors.OKCYAN + "DEBUG:: Closing thread " + str(num) + bcolors.ENDC)
 
 
