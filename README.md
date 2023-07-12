@@ -10,5 +10,5 @@ Testing has been minimal so it may or may not generalise to all languages and pa
 
 ```bash
 # Requires https://pypi.org/project/beautifulsoup4/
-python3 ./wiktionary_webscrape.py
+python3 ./wiktionary_webscraper.py
 ```
