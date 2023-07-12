@@ -19,8 +19,9 @@ from datetime import datetime
 # Once we have all the words, nagivate to the word and get ipa and top 3 defintions
 # by constructing the url of where the definition resides and accessing it.
 # This step is multithreaded, the words list is split into number_of_threads equal parts
-# and each thread gets to process one section
-# Save to file using mutex. File ends up unsorted but gnu sort fixes that.
+# and each thread gets to process one section.
+# Save to file using mutex.
+# File ends up unsorted but gnu sort fixes that (would have to be done manually).
 
 class bcolors:
     HEADER = '\033[95m'
@@ -36,7 +37,9 @@ class bcolors:
 # Globals
 # Takes about 13 minutes on 40 threads (one second delay per word) to get ~10k words
 # which is all spanish verbs
-number_of_threads = 40
+default_number_of_threads = 10
+number_of_threads = 0
+seperator = ' | '
 words_url = "https://en.wiktionary.org/w/index.php?title=Category:"
 def_url = "https://en.wiktionary.org/wiki/"
 global_words_url = ""
@@ -49,7 +52,7 @@ words_on_current_page = 0
 done = 0
 count = 0
 mutex = threading.Lock() # For writing to file
-max_pages = 1000000 # used to testing, lower if you don't care about getting all words from first stage
+max_pages = 1000000 # used for testing, lower if you only want first x pages of words
 debug_filename = "wiktionary_" + str(datetime.now().time()) + ".dump"
 
 def download_page(url):
@@ -58,14 +61,29 @@ def download_page(url):
 
 print(bcolors.HEADER + "Wiktionary Scraper" + bcolors.ENDC)
 
+# These should all be functions but aren't, main starts here basically
+
+while(True):
+    try:
+        raw_in = input("How many threads (default:10)? ")
+        number_of_threads = int(raw_in)
+    except ValueError as e:
+        if(raw_in == ''):
+            number_of_threads = default_number_of_threads
+            break
+        else: 
+            print(e)
+        continue
+    number_of_threads = default_number_of_threads
+    break
+        
+
 # Make sure page exists
 page = False
 while(not page):
-
-    print("What language? ")
-    language = str.capitalize(input())
-    print("What pos? ")
-    pos = str.lower(input())
+    
+    language = str.capitalize(input("What language? "))
+    pos = str.lower(input("What pos? "))
 
     global_words_url = words_url + language + '_' + pos
     print(global_words_url + '\n')
@@ -97,7 +115,6 @@ while(not done):
 
     # Find total words (if we haven't already)
     if(not total_words):
-        # Seemed to be a newline at the end but re doesn't care ig, idk
         p = h2.find_next('p', string = re.compile(r"The following [,\d]+ pages are in this category, out of [,\d]+ total."))
         total_str = p.string.split()[-2]
         total_words = int(total_str.replace(",", ""))
@@ -223,24 +240,12 @@ def get_definition(num, words, mutex):
             defs=[]
             i = 0
             for definition in pos_def.find_all('li'):
-                # This doesn't work because find_all() doesn't return the text which is sitting there not part of a tag (#text)
-                # Just get the first line after all.
-
+                # I'd like to loop until I hit something which doesn't look like a definition
+                # but find_all wasn't returning the text which is sitting there not part of a tag (#text)
                 # There is an arbitrary length of *stuff* optionally followed by synonyms or quotations which starts with a span tag for the toggle thing
                 # https://en.wiktionary.org/wiki/abacorar
                 # https://en.wiktionary.org/wiki/abanderar
-                # Walk until we hit that (or whatever else)
-                # full_definition_without_synonyms = ''
-                # for definition_part in definition.find_all():
-                #     print("looking at " + definition_part.text)
-                #     print("looking at "); print(definition_part.attrs)
-                #     if(definition_part.name == "span" and (definition_part["class"] == "nyms-toggle" or definition_part["class"] == "HQToggle")):
-                #         break
-                #     full_definition_without_synonyms += definition_part.text
-                # defs.append(full_definition_without_synonyms)
-
-                # Can't use this because there are more than just Synonyms we need to avoid
-                # full_definition_without_synonyms = re.split(r"Synonym[s]?:", definition.text)[0] # get first section before split
+                # If something gets included which shouldn't it's probably a new thing being encountered and needs to somehow be excluded from the list item
 
                 # Look one tag up to check if it is an unordered list, if so it is a quotation and not a definition
                 if (definition.find_parent().name == "ul"):
@@ -267,8 +272,7 @@ def get_definition(num, words, mutex):
 
         word = str.capitalize(word)
 
-        # Done create line with desired format
-        seperator = ' | '
+        # Done, now create line with desired format
         line = word + seperator + final_ipa
 
         for definition in defs:

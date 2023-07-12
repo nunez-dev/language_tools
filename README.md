@@ -2,7 +2,12 @@
 
 wiktionary.py is a (shoddy) wiktionary web scraper to download words, IPA, and their definitions from en.wiktionary.org.
 
-It puts them into an unsorted text file with a '|' seperator.
+It puts them into an unsorted text file with a '|' seperator named something like "kazakh_verbs_23:13:02.263280.txt".
 Current that is "word | ipa | def1 | def2 | def3".
 This can then be used to manually import into anki to make an anki dictionary.
 Testing has been minimal so it may or may not generalise to all languages and parts of speech.
+
+```
+# Requires https://pypi.org/project/beautifulsoup4/
+python3 ./wiktionary.py
+```
