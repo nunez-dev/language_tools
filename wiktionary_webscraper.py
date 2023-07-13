@@ -49,6 +49,7 @@ current_letter = ''
 words = []
 total_words = 0
 words_on_current_page = 0
+number_of_defs = 3
 done = 0
 count = 0
 mutex = threading.Lock() # For writing to file
@@ -254,9 +255,9 @@ def get_definition(num, words, mutex):
                 # get only the first line. This is a cheap way to avoid synonyms since they appear on the second line
                 defs.append(definition.text.partition('\n')[0])
 
-                # only get 3
+                # only get number_of_defs
                 i += 1
-                if(i == 3):
+                if(i >= number_of_defs):
                     break
         
         # Some post processing, turn [ipa] into /ipa/
@@ -275,7 +276,11 @@ def get_definition(num, words, mutex):
         # Done, now create line with desired format
         line = word + seperator + final_ipa
 
-        for definition in defs:
+        for def_number in range(number_of_defs):
+            # Empty def if we don't have one to use
+            definition = " "
+            if(def_number < len(defs)):
+                definition = defs[def_number]
             line = line + seperator + definition
 
         #print(bcolors.OKBLUE + url + bcolors.ENDC)
