@@ -1,3 +1,5 @@
+#!/usr/bin/python3 -u
+
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -21,7 +23,6 @@ from datetime import datetime
 # This step is multithreaded, the words list is split into number_of_threads equal parts
 # and each thread gets to process one section.
 # Save to file using mutex.
-# File ends up unsorted but gnu sort fixes that (would have to be done manually).
 
 class bcolors:
     HEADER = '\033[95m'
@@ -34,9 +35,19 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+# Enable if you don't want colours. Handy for redirect to a file
+# class bcolors:
+#     HEADER = ''
+#     OKBLUE = ''
+#     OKCYAN = ''
+#     OKGREEN = ''
+#     WARNING = ''
+#     FAIL = ''
+#     ENDC = ''
+#     BOLD = ''
+#     UNDERLINE = ''
+
 # Globals
-# Takes about 13 minutes on 40 threads (one second delay per word) to get ~10k words
-# which is all spanish verbs
 default_number_of_threads = 10
 number_of_threads = 0
 seperator = ' | '
@@ -53,14 +64,15 @@ number_of_defs = 3
 done = 0
 count = 0
 ipa_pattern = ""
+headers = {'User-Agent': 'Wiktionary_webscraper_bot/0.0 (https://github.com/nunez-dev/language_tools)'}
 
 mutex = threading.Lock() # For writing to file
-max_pages = 1 # used for testing, lower if you only want first x pages of words
+max_pages = 1000 # used for testing, lower if you only want first x pages of words
 time_str = datetime.utcnow().strftime('%Y-%m-%d_%H:%M:%S')
 debug_filename = "wiktionary_webscraper_" + time_str + ".html"
 
 def download_page(url):
-    response = requests.get(url)
+    response = requests.get(url, headers=headers)
     return response
 
 print(bcolors.HEADER + __file__ + bcolors.ENDC)
@@ -79,7 +91,13 @@ while(True):
     number_of_threads = num
     break
 
-ipa_pattern = input("Matching pattern for IPA descriptions to prioritise an IPA if there are multiple.\nImplemented to be able to prioritise certain geographies.\nSome IPAs have for example (Spain) or (Latin America) before them.\nL+ or \"Latin America\" would match the latter.\n(default:\"\")? ")
+ipa_pattern = input("\
+What matching pattern should be used with IPA descriptions to prioritise an IPA if there are multiple?\n\
+This was implemented to be able to prioritise certain geographies.\n\
+Some IPAs have for example (Spain) or (Latin America) before them.\n\
+L+ or \"Latin America\" would match the latter (it's regex).\n\
+Default will prioritise the first encountered phonetic IPA\n\
+(default:\"\")? ")
 
 # Make sure page exists
 page = False
@@ -93,15 +111,15 @@ while(not page):
 
     response = download_page(global_words_url)
     if (response.status_code != 200):
-        print(bcolors.FAIL + "Error: " + bcolors.ENDC, end="")
+        print(bcolors.FAIL + "ERROR:: " + bcolors.ENDC, end="")
     else:
-        print(bcolors.OKGREEN + "Success: " + bcolors.ENDC, end="")
+        print(bcolors.OKGREEN + "SUCCESS:: " + bcolors.ENDC, end="")
         page=True
     
     print("Url returned " + str(response.status_code))
     print(text_div)
 
-audio_dir = "./" + str.lower(language) + "_audio_" + time_str
+audio_dir = "./" + str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str
 # Now we know this works we can keep using this url
 while(not done):
 
@@ -179,7 +197,7 @@ print(text_div)
 # Goal:
 # Only look under the language we are interested in
 # Ignore etymology
-# Grab first IPA pronunciation or none at all
+# Grab first IPA phonetic pronunciation or a later one if it matches
 # Look for the definitions (only for the pos specified)
 # Since there are multiple, try get top 3.
 
@@ -208,7 +226,7 @@ def get_definition(num, words, mutex):
         other_language = 0
         if(not language_id):
             # If there are other problems we log it anyway but assuming it is just heading issue
-            print(thread_prefix + bcolors.FAIL + "See " + debug_filename + ". No good response from url? " + url + bcolors.ENDC)
+            print(thread_prefix + bcolors.FAIL + "ERROR: See " + debug_filename + ". No good response from url? " + url + bcolors.ENDC)
             with open(debug_filename, 'w', encoding='utf-8') as file:
                 file.write(response.text)
             language_id = soup.find('span', class_="mw-page-title-main") # search from top heading, not language heading
@@ -236,8 +254,7 @@ def get_definition(num, words, mutex):
                 # We get the first IPA we can and store it
                 # Then if there is a square bracket one, store that instead,
                 # Just sit with the first IPA until we encounter something better, so if we encounter nothing better we have the top of the list
-                # Now if geos are enabled, add the correct geo one. No problem if nothing matches
-                # After, we get from the "ipa" variable, which represents our best find
+                # If geos are enabled, add the correct geo one. After, we get from the "ipa" variable, which represents our best find
                 for pronunciation_item in pronunciation_ul.find_all('li'):
 
                     # Just get the first one so we have something
@@ -258,20 +275,20 @@ def get_definition(num, words, mutex):
                     geo = pronunciation_item.find('span', class_="ib-content qualifier-content")
                     if(geo):
                         # See if it matches our pattern if we have one
-                        match = re.search(ipa_pattern, geo.string)
-                        if(match):
-                            print(thread_prefix + bcolors.OKCYAN + "DEBUG:: IPA Match for " + word + ": " + geo.string + bcolors.ENDC)
-                            # Great, just use whatever we can from this line
-                            # Repetitive code, could be a function
-                            ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile('/' + r".*" + '/'))
-                            if(ipa_span and not ipa_phonemic):
-                                ipa = ipa_span.string
+                        if (ipa_pattern != ""):
+                            match = re.search(ipa_pattern, geo.string)
+                            if(match):
+                                print(thread_prefix + bcolors.OKCYAN + "DEBUG:: IPA Match for " + word + ": " + geo.string + bcolors.ENDC)
+                                # Great, use this line
+                                ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile('/' + r".*" + '/'))
+                                if(ipa_span):
+                                    ipa = ipa_span.string
 
-                            # Now we are only matching IPAs with square brackets because of string param
-                            ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile('[' + r".*" + ']'))
-                            if(ipa_span and not ipa_phonetic):
-                                ipa = ipa_span.string
-                        # If there is no match, we will end up trying again on the next line
+                                ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile('[' + r".*" + ']'))
+                                if(ipa_span):
+                                    ipa = ipa_span.string
+                            
+                            # If there is no match, we will end up trying again on the next line (line as in line on the webpage)
 
                     # Now the audio, still under the Pronunciation header
                     audio = pronunciation_item.find('audio')
@@ -289,10 +306,9 @@ def get_definition(num, words, mutex):
                         audio_url = "http://" + audio.find_all('source')[-1]["src"][2:]
                         audio_received = download_page(audio_url)
                         if (audio_received.status_code != 200):
-                            print(thread_prefix + bcolors.FAIL + "Error: " + audio_url + '\n' + str(audio_received.status_code) + bcolors.ENDC, end="")
+                            print(thread_prefix + bcolors.FAIL + "ERROR:: " + audio_url + '\n' + str(audio_received.status_code) + bcolors.ENDC + '\n', end="")
                         else:
-                            print(thread_prefix + bcolors.OKGREEN + "Success: " + audio_url + bcolors.ENDC, end="")
-                        print('\n')
+                            print(thread_prefix + bcolors.OKGREEN + "SUCCESS: " + audio_url + bcolors.ENDC + '\n', end="")
                         if not os.path.exists(audio_dir):
                             os.makedirs(audio_dir)
                         with open(audio_path, 'wb') as f:
@@ -302,7 +318,7 @@ def get_definition(num, words, mutex):
         pos_without_s = str.capitalize(pos[:-1]) # This just strips last letter e.g: Verbs to Verb
         pos_id = language_id.find_next('span', id=re.compile(pos_without_s + r".*")) # Sometimes it is Verb_3
         if not(pos_id):
-            print(thread_prefix + bcolors.FAIL + "No definition found for " + word + " looking under " + pos_without_s + bcolors.ENDC)
+            print(thread_prefix + bcolors.FAIL + "ERROR:: No definition found for " + word + " looking under " + pos_without_s + bcolors.ENDC)
         # Again make sure it's under our language
         if(check_language(pos_id, other_language)):
             print(thread_prefix + bcolors.OKCYAN + "DEBUG:: We found a definition, but not under our language, so ignore" + bcolors.ENDC)
@@ -345,9 +361,12 @@ def get_definition(num, words, mutex):
                 definition = defs[def_number]
             line = line + seperator + definition
 
-        # and audio
-        line = line + seperator + audio_path
-
+        # add audio
+        if(audio_path != ""):
+            line = line + seperator + "[sound:" + audio_filename + "]"
+        else:
+            ling = line + seperator
+        
         print(thread_prefix + bcolors.OKBLUE + url + bcolors.ENDC)
         print(thread_prefix + bcolors.OKGREEN + line + bcolors.ENDC)
 
@@ -369,7 +388,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_threads) as exe
     futures = {executor.submit(get_definition, i, words_chunk, mutex) for i, words_chunk in enumerate(words_chunks)}
     for future in concurrent.futures.as_completed(futures):
         try:
-            print(f"Task completed: {future.result()}")
+            print(f"DEBUG:: Task completed: {future.result()}")
         except Exception as e:
-            print(f"An error occurred in the future: {e}")
+            print(f"ERROR: An error occurred in the future: {e}")
             traceback.print_exc()
