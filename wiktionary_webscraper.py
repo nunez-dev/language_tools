@@ -68,7 +68,7 @@ headers = {'User-Agent': 'Wiktionary_webscraper_bot/0.0 (https://github.com/nune
 
 mutex = threading.Lock() # For writing to file
 max_pages = 1000 # used for testing, lower if you only want first x pages of words
-time_str = datetime.utcnow().strftime('%Y-%m-%d_%H:%M:%S')
+time_str = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
 debug_filename = "wiktionary_webscraper_" + time_str + ".html"
 
 def download_page(url):
@@ -117,7 +117,7 @@ while(not page):
     print("Url returned " + str(response.status_code))
     print(text_div)
 
-audio_dir = "./" + str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str
+audio_dir = str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str
 # Now we know this works we can keep using this url
 while(not done):
 
