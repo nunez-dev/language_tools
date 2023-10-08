@@ -256,7 +256,7 @@ def get_definition(num, words, mutex):
                 for pronunciation_item in pronunciation_ul.find_all('li'):
 
                     # Just get the first one so we have something
-                    ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\\.*\\"))
+                    ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\/.*\/"))
                     if(ipa_span and not ipa_phonemic):
                         ipa = ipa_span.text
                         ipa_phonemic = 1 # So we don't override on later ones
@@ -278,7 +278,7 @@ def get_definition(num, words, mutex):
                             if(match):
                                 print(thread_prefix + bcolors.OKCYAN + "DEBUG:: IPA Match for " + word + ": " + geo.text + bcolors.ENDC)
                                 # Great, use this line
-                                ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\\.*\\"))
+                                ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\/.*\/"))
                                 if(ipa_span):
                                     ipa = ipa_span.text
 
