@@ -9,7 +9,7 @@ import threading
 import math
 import traceback
 import os, errno
-from datetime import datetime
+import datetime
 
 # Get language and part of speech we want from the user
 # Look under the ' Pages in category "Spanish verbs" '
@@ -68,7 +68,7 @@ headers = {'User-Agent': 'Wiktionary_webscraper_bot/0.0 (https://github.com/nune
 
 mutex = threading.Lock() # For writing to file
 max_pages = 1000 # used for testing, lower if you only want first x pages of words
-time_str = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
+time_str = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d_%H-%M-%S')
 debug_filename = "wiktionary_webscraper_" + time_str + ".html"
 
 def download_page(url):
@@ -258,13 +258,13 @@ def get_definition(num, words, mutex):
                     # Just get the first one so we have something
                     ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\\.*\\"))
                     if(ipa_span and not ipa_phonemic):
-                        ipa = ipa_span.string
+                        ipa = ipa_span.text
                         ipa_phonemic = 1 # So we don't override on later ones
 
                     # Now we are only matching IPAs with square brackets because of string param
                     ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\[.*\]"))
                     if(ipa_span and not ipa_phonetic):
-                        ipa = ipa_span.string
+                        ipa = ipa_span.text
                         ipa_phonetic = 1
 
                     # For each IPA list item
@@ -274,17 +274,17 @@ def get_definition(num, words, mutex):
                     if(geo):
                         # See if it matches our pattern if we have one
                         if (ipa_pattern != ""):
-                            match = re.search(ipa_pattern, geo.string)
+                            match = re.search(ipa_pattern, geo.text)
                             if(match):
-                                print(thread_prefix + bcolors.OKCYAN + "DEBUG:: IPA Match for " + word + ": " + geo.string + bcolors.ENDC)
+                                print(thread_prefix + bcolors.OKCYAN + "DEBUG:: IPA Match for " + word + ": " + geo.text + bcolors.ENDC)
                                 # Great, use this line
                                 ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\\.*\\"))
                                 if(ipa_span):
-                                    ipa = ipa_span.string
+                                    ipa = ipa_span.text
 
                                 ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\[.*\]"))
                                 if(ipa_span):
-                                    ipa = ipa_span.string
+                                    ipa = ipa_span.text
                             
                             # If there is no match, we will end up trying again on the next line (line as in line on the webpage)
 
@@ -317,6 +317,7 @@ def get_definition(num, words, mutex):
         pos_id = language_id.find_next('span', id=re.compile(pos_without_s + r".*")) # Sometimes it is Verb_3
         if not(pos_id):
             print(thread_prefix + bcolors.FAIL + "ERROR:: No definition found for " + word + " looking under " + pos_without_s + bcolors.ENDC)
+            continue # Go onto next word
         # Again make sure it's under our language
         if(check_language(pos_id, other_language)):
             print(thread_prefix + bcolors.OKCYAN + "DEBUG:: We found a definition, but not under our language, so ignore" + bcolors.ENDC)
