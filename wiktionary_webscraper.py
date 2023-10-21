@@ -67,7 +67,7 @@ pos = ""
 
 mutex = threading.Lock() # For writing to wordlist
 log_mutex = threading.Lock() # For writing to log
-max_pages = 5 # used for testing, lower if you only want first x pages of words
+max_pages = 100000 # used for testing, lower if you only want first x pages of words
 
 def time_str():
     return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
