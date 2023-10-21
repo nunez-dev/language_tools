@@ -10,6 +10,8 @@ import math
 import traceback
 import os, errno
 import datetime
+import sys
+from tqdm import tqdm
 
 # Get language and part of speech we want from the user
 # Look under the ' Pages in category "Spanish verbs" '
@@ -25,6 +27,9 @@ import datetime
 # Save to file using mutex.
 
 class bcolors:
+    pass
+
+class bcolors_real:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
@@ -35,153 +40,168 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-# Enable if you don't want colours. Handy for redirect to a file
-# class bcolors:
-#     HEADER = ''
-#     OKBLUE = ''
-#     OKCYAN = ''
-#     OKGREEN = ''
-#     WARNING = ''
-#     FAIL = ''
-#     ENDC = ''
-#     BOLD = ''
-#     UNDERLINE = ''
+class bcolors_stub:
+    HEADER = ''
+    OKBLUE = ''
+    OKCYAN = ''
+    OKGREEN = ''
+    WARNING = ''
+    FAIL = ''
+    ENDC = ''
+    BOLD = ''
+    UNDERLINE = ''
 
 # Globals
 default_number_of_threads = 10
 number_of_threads = 0
 seperator = ' | '
-words_url = "https://en.wiktionary.org/w/index.php?title=Category:"
 def_url = "https://en.wiktionary.org/wiki/"
-global_words_url = ""
-url_params = ""
 text_div = '-'*60
-current_letter = ''
 words = []
-total_words = 0
-words_on_current_page = 0
 number_of_defs = 3
-done = 0
-count = 0
 ipa_pattern = ""
 headers = {'User-Agent': 'Wiktionary_webscraper_bot/0.0 (https://github.com/nunez-dev/language_tools)'}
+colored_log = 0
+language = ""
+pos = ""
 
-mutex = threading.Lock() # For writing to file
-max_pages = 1000 # used for testing, lower if you only want first x pages of words
-time_str = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d_%H-%M-%S')
-debug_filename = "wiktionary_webscraper_" + time_str + ".html"
+mutex = threading.Lock() # For writing to wordlist
+log_mutex = threading.Lock() # For writing to log
+max_pages = 5 # used for testing, lower if you only want first x pages of words
+
+def time_str():
+    return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
 def download_page(url):
     response = requests.get(url, headers=headers)
     return response
 
-while(True):
-    try:
-        raw_in = input("How many threads (default:10)? ")
-        num = int(raw_in)
-    except ValueError as e:
-        if(raw_in == ''):
-            number_of_threads = default_number_of_threads
-            break
-        else: 
-            print(e)
-        continue
-    number_of_threads = num
-    break
+def log(color, thread_prefix, item):
+    with log_mutex:
+        with open(log_filename, 'a', encoding='utf-8') as file:
+            if(colored_log):
+                string = thread_prefix + color + item + bcolors.ENDC
+            else:
+                string = thread_prefix + item
+            file.write(string + '\n')
 
-ipa_pattern = input("\
-What matching pattern should be used with IPA descriptions to prioritise an IPA if there are multiple?\n\
-This was implemented to be able to prioritise certain geographies.\n\
-Some IPAs have for example (Spain) or (Latin America) before them.\n\
-L+ or \"Latin America\" would match the latter (it's regex).\n\
-Default will prioritise the first encountered phonetic IPA\n\
-(default:\"\")? ")
+def startup():
+    words_url = "https://en.wiktionary.org/w/index.php?title=Category:"
+    final_words_url = ""
+    url_params = ""
+    current_letter = ''
+    words_on_current_page = 0
+    total_words = 0
+    done = 0
+    count = 0
+    global number_of_threads, language, pos, words, ipa_pattern
+    while(True):
+        try:
+            raw_in = input("How many threads (default:10)? ")
+            num = int(raw_in)
+        except ValueError as e:
+            if(raw_in == ''):
+                number_of_threads = default_number_of_threads
+                break
+            else: 
+                print(e)
+            continue
+        number_of_threads = num
+        break
 
-# Make sure page exists
-page = False
-while(not page):
-    
-    language = str.capitalize(input("What language? "))
-    pos = str.lower(input("What part of speech/lemma?\n(See %s_lemmas) " % (words_url + language)))
+    ipa_pattern = input("\
+    What matching pattern should be used with IPA descriptions to prioritise an IPA if there are multiple?\n\
+    This was implemented to be able to prioritise certain geographies.\n\
+    Some IPAs have for example (Spain) or (Latin America) before them.\n\
+    L+ or \"Latin America\" would match the latter (it's regex).\n\
+    Default will prioritise the first encountered phonetic IPA\n\
+    (default:\"\")? ")
 
-    global_words_url = words_url + language + '_' + pos
-    print(global_words_url + '\n')
-
-    response = download_page(global_words_url)
-    if (response.status_code != 200):
-        print(bcolors.FAIL + "ERROR:: " + bcolors.ENDC, end="")
-    else:
-        print(bcolors.OKGREEN + "SUCCESS:: " + bcolors.ENDC, end="")
-        page=True
-    
-    print("Url returned " + str(response.status_code))
-    print(text_div)
-
-audio_dir = str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str
-# Now we know this works we can keep using this url
-while(not done):
-
-    words_on_current_page = 0 # reset this
-
-    url = global_words_url + url_params
-    response = download_page(url)
-
-    # Beautiful soup for parsing the page
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    # Try find the sub heading of interest ' Pages in category "Spanish verbs" '
-    h2 = soup.find('h2', string=f"Pages in category \"{language} {pos}\"")
-
-    # Find total words (if we haven't already)
-    if(not total_words):
-        p = h2.find_next('p', string = re.compile(r"The following [,\d]+ pages are in this category, out of [,\d]+ total."))
-        total_str = p.string.split()[-2]
-        total_words = int(total_str.replace(",", ""))
-
-    # Find the content div after heading 2
-    # This hold all the words, it's a div with class="mw-category mw-category-columns"
-    # Can help us oversearching for h3 headers
-    div = h2.find_next('div', class_="mw-category mw-category-columns")
+    # Make sure page exists
+    page = False
+    while(not page):
         
-    # Find all h3s in this div and go through them (letters)
-    for h3 in div.find_all('h3'):
+        language = str.capitalize(input("What language? "))
+        pos = str.lower(input("What part of speech/lemma?\n(See %s_lemmas) " % (words_url + language)))
 
-        # If we reached a new letter, print it (because fun :)
-        if ( current_letter != h3.string ):
-            current_letter = h3.string
-            print("New letter is " + current_letter)
+        final_words_url = words_url + language + '_' + pos
+        print(final_words_url + '\n')
 
-        # Sometimes they are unicode (cyrilic, like Б)
-        # So just see if it is length 1 (as oppossed to A-Z)
-        if(len(h3.string) != 1 or h3.string == '*' ):
-            print("Found this heading, but not parsing because it didn't look like a letter: ", h3.string)
-            # Okay, we will skip to next heading
+        response = download_page(final_words_url)
+        if (response.status_code != 200):
+            print(bcolors.FAIL + "ERROR:: " + bcolors.ENDC, end="")
         else:
-            # Actually process
-            # Then the unordered list
-            ul = h3.find_next('ul')
-            # And every entry (list entry)
-            for li in ul.find_all('li'):
-                words_on_current_page += 1
-                words.append(li.string)
+            print(bcolors.OKGREEN + "SUCCESS:: " + bcolors.ENDC, end="")
+            page=True
+        
+        print("Url returned " + str(response.status_code))
+        print(text_div)
+
+    audio_dir = str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str()
+    # Now we know this works we can keep using this url
+    while(not done):
+
+        words_on_current_page = 0 # reset this
+
+        url = final_words_url + url_params
+        response = download_page(url)
+
+        # Beautiful soup for parsing the page
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Try find the sub heading of interest ' Pages in category "Spanish verbs" '
+        h2 = soup.find('h2', string=f"Pages in category \"{language} {pos}\"")
+
+        # Find total words (if we haven't already)
+        if(not total_words):
+            p = h2.find_next('p', string = re.compile(r"The following [,\d]+ pages are in this category, out of [,\d]+ total."))
+            total_str = p.string.split()[-2]
+            total_words = int(total_str.replace(",", ""))
+
+        # Find the content div after heading 2
+        # This hold all the words, it's a div with class="mw-category mw-category-columns"
+        # Can help us oversearching for h3 headers
+        div = h2.find_next('div', class_="mw-category mw-category-columns")
+            
+        # Find all h3s in this div and go through them (letters)
+        for h3 in div.find_all('h3'):
+
+            # If we reached a new letter, print it (because fun :)
+            if ( current_letter != h3.string ):
+                current_letter = h3.string
+                print("New letter is " + current_letter)
+
+            # Sometimes they are unicode (cyrilic, like Б)
+            # So just see if it is length 1 (as oppossed to A-Z)
+            if(len(h3.string) != 1 or h3.string == '*' ):
+                print("Found this heading, but not parsing because it didn't look like a letter: ", h3.string)
+                # Okay, we will skip to next heading
+            else:
+                # Actually process
+                # Then the unordered list
+                ul = h3.find_next('ul')
+                # And every entry (list entry)
+                for li in ul.find_all('li'):
+                    words_on_current_page += 1
+                    words.append(li.string)
 
 
-    cumulative = len(words)
-    percent = round(cumulative/total_words * 100)
-    print(str(percent) + "% : Found " + str(words_on_current_page) + ", we have " + str(cumulative) + " out of " + str(total_words) + " words.")
-    # Get link to the next page
-    np = ul.find_next('a', string = "next page")
-    if (not np):
-        done = 1
-    else:
-        url_params = '&' + np['href'].split("&", 1)[1] # we are only interested in after the &
-    # Example : href="/w/index.php?title=Category:Spanish_verbs&pagefrom=ACITRONAR%0Aacitronar#mw-pages"
-    #time.sleep(1)
-    if ( count == max_pages ):
-        done = 1
-    count += 1
+        cumulative = len(words)
+        percent = round(cumulative/total_words * 100)
+        print(str(percent) + "% : Found " + str(words_on_current_page) + ", we have " + str(cumulative) + " out of " + str(total_words) + " words.")
+        # Get link to the next page
+        np = ul.find_next('a', string = "next page")
+        if (not np):
+            done = 1
+        else:
+            url_params = '&' + np['href'].split("&", 1)[1] # we are only interested in after the &
+        # Example : href="/w/index.php?title=Category:Spanish_verbs&pagefrom=ACITRONAR%0Aacitronar#mw-pages"
+        #time.sleep(1)
+        if ( count == max_pages ):
+            done = 1
+        count += 1
 
-print(text_div)
+    print(text_div)
 
 # Problems:
 # Multiple languages sometimes appear here
@@ -208,27 +228,41 @@ def check_language(node, permissable):
         return 1
     return 0
 
-# Open our file to append to
-filename = str.lower(language) + '_' + str.lower(pos) + '_' + time_str + ".txt"
-
-def get_definition(num, words, mutex):
-    print(bcolors.OKCYAN + "DEBUG:: Starting thread " + str(num) + " for words from " + words[0] + " to " + words[len(words)-1] + bcolors.ENDC)
+def get_definition(num, words, pbar, mutex):
+    with mutex:
+        print(bcolors.OKCYAN + "DEBUG:: Starting thread " + str(num) + " for words from " + words[0] + " to " + words[len(words)-1] + bcolors.ENDC)
+    slowdown = 0 # in ms, each thread has its own instance
+    good_response = 0
     thread_prefix = str(num) + ': '
+
     for word in words:
         url = def_url + word.replace(" ", "_")
-        response = download_page(url)
+
+        while(not good_response):
+            time.sleep(slowdown)
+            response = download_page(url)
+            if response.status_code == 200:
+                good_response = 1
+            elif response.status_code == 429:
+                slowdown += 50/1000
+            else:
+                debug_filename = "wiktionary_webscraper_" + time_str() + ".html"
+                log(bcolors.FAIL, thread_prefix, "ERROR:: See " + debug_filename + ". No good response from url? " + url + bcolors.ENDC)
+                with open(debug_filename, 'w', encoding='utf-8') as file:
+                    file.write(response.text)
+                break
+        
+        if(not good_response):
+            continue # try next word
+
         soup = BeautifulSoup(response.text, 'html.parser')
         language_id = soup.find('span', class_="mw-headline", id=language) # Language heading we search under
-        # If we can't find anything then just accept the first heading. eg https://en.wiktionary.org/wiki/torcer las palabras
-        # Spanish word but has english heading
+        # If we can't find anything then just accept the first heading, sometimes the headings are wrong. eg https://en.wiktionary.org/w/index.php?title=torcer_las_palabras&oldid=73513100
         other_language = 0
         if(not language_id):
-            # If there are other problems we log it anyway but assuming it is just heading issue
-            print(thread_prefix + bcolors.FAIL + "ERROR: See " + debug_filename + ". No good response from url? " + url + bcolors.ENDC)
-            with open(debug_filename, 'w', encoding='utf-8') as file:
-                file.write(response.text)
             language_id = soup.find('span', class_="mw-page-title-main") # search from top heading, not language heading
             other_language = 1
+            # HANDLE THIS PROPERLY
 
         # We will do the IPA first
         # https://en.wiktionary.org/wiki/abalanzar#Spanish
@@ -245,7 +279,7 @@ def get_definition(num, words, mutex):
         audio_path = ""
         if(pronunciation_id):
             if(check_language(pronunciation_id, other_language)):
-                print(thread_prefix + bcolors.OKCYAN + "DEBUG:: We found a pronunciation, but not under our language, so ignore" + bcolors.ENDC)
+                log(bcolors.OKCYAN, thread_prefix, "DEBUG:: We found a pronunciation, but not under our language, so ignore")
             else:
                 pronunciation_ul = pronunciation_id.find_next('ul')
 
@@ -276,7 +310,7 @@ def get_definition(num, words, mutex):
                         if (ipa_pattern != ""):
                             match = re.search(ipa_pattern, geo.text)
                             if(match):
-                                print(thread_prefix + bcolors.OKCYAN + "DEBUG:: IPA Match for " + word + ": " + geo.text + bcolors.ENDC)
+                                log(bcolors.OKCYAN, thread_prefix, "DEBUG:: IPA Match for " + word + ": " + geo.text)
                                 # Great, use this line
                                 ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\/.*\/"))
                                 if(ipa_span):
@@ -290,8 +324,6 @@ def get_definition(num, words, mutex):
 
                     # Now the audio, still under the Pronunciation header
                     audio = pronunciation_item.find('audio')
-                    # print("NEW LOOP:")
-                    # print(pronunciation_item.prettify())
                     if(audio):
                         audio_filename = audio["data-mwtitle"]
                         audio_path = audio_dir + '/' + audio_filename
@@ -304,9 +336,7 @@ def get_definition(num, words, mutex):
                         audio_url = "http://" + audio.find_all('source')[-1]["src"][2:]
                         audio_received = download_page(audio_url)
                         if (audio_received.status_code != 200):
-                            print(thread_prefix + bcolors.FAIL + "ERROR:: " + audio_url + '\n' + str(audio_received.status_code) + bcolors.ENDC + '\n', end="")
-                        else:
-                            print(thread_prefix + bcolors.OKGREEN + "SUCCESS: " + audio_url + bcolors.ENDC + '\n', end="")
+                            log(bcolors.FAIL, thread_prefix, "ERROR:: " + audio_url + '\n' + str(audio_received.status_code))
                         if not os.path.exists(audio_dir):
                             os.makedirs(audio_dir)
                         with open(audio_path, 'wb') as f:
@@ -316,12 +346,12 @@ def get_definition(num, words, mutex):
         pos_without_s = str.capitalize(pos[:-1]) # This just strips last letter e.g: Verbs to Verb
         pos_id = language_id.find_next('span', id=re.compile(pos_without_s + r".*")) # Sometimes it is Verb_3
         if not(pos_id):
-            print(thread_prefix + bcolors.FAIL + "ERROR:: No definition found for " + word + " looking under " + pos_without_s + bcolors.ENDC)
+            log(bcolors.FAIL, thread_prefix, "ERROR:: No definition found for " + word + " looking under " + pos_without_s)
             continue # Go onto next word
         # Again make sure it's under our language
         if(check_language(pos_id, other_language)):
-            print(thread_prefix + bcolors.OKCYAN + "DEBUG:: We found a definition, but not under our language, so ignore" + bcolors.ENDC)
-            # Idk when this would ever happen, would require there to be no definition for our language
+            log(bcolors.OKCYAN, thread_prefix, "DEBUG:: We found a definition, but not under our language, so ignore")
+            # Idk when this would ever happen, would require there to be no definition for our language (but still a language header)
         else:
             # Find the next ordered list
             pos_def = pos_id.find_next('ol')
@@ -365,9 +395,6 @@ def get_definition(num, words, mutex):
             line = line + seperator + "[sound:" + audio_filename + "]"
         else:
             line = line + " " + seperator
-        
-        print(thread_prefix + bcolors.OKBLUE + url + bcolors.ENDC)
-        print(thread_prefix + bcolors.OKGREEN + line + bcolors.ENDC)
 
         # write to file (thread safe)
         # can monitor with something like
@@ -375,19 +402,59 @@ def get_definition(num, words, mutex):
         with mutex:
             with open(filename, 'a', encoding='utf-8') as file:
                 file.write(line + '\n')
+        pbar.update(1)
         #time.sleep(1)
-    print(bcolors.OKCYAN + "DEBUG:: Closing thread " + str(num) + bcolors.ENDC)
+    return 0
 
 
-# The following is mostly from chatgpt for how to split up the list and call ThreadPoolExecutor
+# Process command-line arguments
+if(len(sys.argv) == 1):
+    sys.argv.append("--color=auto") # Default
+
+for i in range(1, len(sys.argv)):
+    if(sys.argv[i][0:8] == "--color="):
+        val = sys.argv[i][8:]
+        if(val == "always"):
+            bcolors = bcolors_real
+            colored_log = 1
+        elif(val == "auto"):
+            if sys.stdout.isatty():
+                bcolors = bcolors_real
+            else:
+                bcolors = bcolors_stub
+        elif(val == "never"):
+            bcolors = bcolors_stub
+        else:
+            print("Unrecognised value: " + val)
+            exit(1)            
+    else:
+        print("Unrecognised option: " + sys.argv[i])
+        exit(1)
+
+
+startup()
+
+# Open our file to append to
+filename = str.lower(language) + '_' + str.lower(pos) + '_' + time_str()
+log_filename = filename + "_log.txt"
+filename = filename + ".txt"
 # split words into equal chunks
 chunk_size = math.ceil(len(words) / number_of_threads)
-words_chunks = [words[i:i+chunk_size] for i in range(0, len(words), chunk_size)]
+words_chunks = []
+progress_bars = []
+
+# Construct progress bars and create words chunks
+for i in range(0, len(words), chunk_size):
+    words_chunks.append(words[i:i+chunk_size])
+    if i+chunk_size > len(words):
+        chunk_size -= ((i+chunk_size)-len(words))
+    progress_bars.append(tqdm(desc=str(int(i/chunk_size)+1)+": ", total=chunk_size, unit='w', delay=1))
+
 with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_threads) as executor:
-    futures = {executor.submit(get_definition, i, words_chunk, mutex) for i, words_chunk in enumerate(words_chunks)}
+    futures = {executor.submit(get_definition, i+1, words_chunk, progress_bars[i], mutex) for i, words_chunk in enumerate(words_chunks)}
     for future in concurrent.futures.as_completed(futures):
         try:
-            print(f"DEBUG:: Task completed: {future.result()}")
+            log(bcolors.OKCYAN, "0: " , f"DEBUG:: Task returned: {future.result()} for thread{i+1}")
         except Exception as e:
-            print(f"ERROR: An error occurred in the future: {e}")
+            log(bcolors.FAIL, "0: ", f"ERROR:: An error occurred in the future: {e}")
             traceback.print_exc()
