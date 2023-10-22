@@ -67,7 +67,7 @@ pos = ""
 
 mutex = threading.Lock() # For writing to wordlist
 log_mutex = threading.Lock() # For writing to log
-max_pages = 100000 # used for testing, lower if you only want first x pages of words
+max_pages = 10000 # used for testing, lower if you only want first x pages of words
 
 def time_str():
     return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -121,7 +121,7 @@ def startup():
     page = False
     while(not page):
         
-        language = str.capitalize(input("What language? "))
+        language = input("What language? (Case sensitive) ")
         pos = str.lower(input("What part of speech/lemma?\n(See %s_lemmas) " % (words_url + language)))
 
         final_words_url = words_url + language + '_' + pos
@@ -137,7 +137,6 @@ def startup():
         print("Url returned " + str(response.status_code))
         print(text_div)
 
-    audio_dir = str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str()
     # Now we know this works we can keep using this url
     while(not done):
 
@@ -150,7 +149,7 @@ def startup():
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Try find the sub heading of interest ' Pages in category "Spanish verbs" '
-        h2 = soup.find('h2', string=f"Pages in category \"{language} {pos}\"")
+        h2 = soup.find('h2', string=f"Pages in category \"{language.replace('_', ' ')} {pos}\"")
 
         # Find total words (if we haven't already)
         if(not total_words):
@@ -228,15 +227,15 @@ def check_language(node, permissable):
         return 1
     return 0
 
-def get_definition(num, words, pbar, mutex):
+def get_definition(num, words, gpbar, pbar, mutex):
     with mutex:
-        print(bcolors.OKCYAN + "DEBUG:: Starting thread " + str(num) + " for words from " + words[0] + " to " + words[len(words)-1] + bcolors.ENDC)
-    slowdown = 0 # in ms, each thread has its own instance
-    good_response = 0
+        print(bcolors.OKCYAN + "Starting thread " + str(num) + " for words from " + words[0] + " to " + words[len(words)-1] + bcolors.ENDC)
+    slowdown = 0 # each thread has its own instance
     thread_prefix = str(num) + ': '
 
     for word in words:
         url = def_url + word.replace(" ", "_")
+        good_response = 0
 
         while(not good_response):
             time.sleep(slowdown)
@@ -244,7 +243,8 @@ def get_definition(num, words, pbar, mutex):
             if response.status_code == 200:
                 good_response = 1
             elif response.status_code == 429:
-                slowdown += 50/1000
+                slowdown += 25/1000
+                log(bcolors.WARNING, thread_prefix, "WARN:: Told to slow down, setting slowdown=" + str(slowdown) + "s" + bcolors.ENDC)
             else:
                 debug_filename = "wiktionary_webscraper_" + time_str() + ".html"
                 log(bcolors.FAIL, thread_prefix, "ERROR:: See " + debug_filename + ". No good response from url? " + url + bcolors.ENDC)
@@ -262,7 +262,6 @@ def get_definition(num, words, pbar, mutex):
         if(not language_id):
             language_id = soup.find('span', class_="mw-page-title-main") # search from top heading, not language heading
             other_language = 1
-            # HANDLE THIS PROPERLY
 
         # We will do the IPA first
         # https://en.wiktionary.org/wiki/abalanzar#Spanish
@@ -270,6 +269,7 @@ def get_definition(num, words, pbar, mutex):
         # This is another example but of a dropdown. Not considered:
         # https://en.wiktionary.org/wiki/ababillarse
 
+        # NOTE I think we crash here if we get status code 200 but weird webpage, language_id will be NoneType
         pronunciation_id = language_id.find_next('span', id=re.compile("Pronunciation" + r".*"))
 
         ipa_phonemic = 0
@@ -279,7 +279,8 @@ def get_definition(num, words, pbar, mutex):
         audio_path = ""
         if(pronunciation_id):
             if(check_language(pronunciation_id, other_language)):
-                log(bcolors.OKCYAN, thread_prefix, "DEBUG:: We found a pronunciation, but not under our language, so ignore")
+                # log(bcolors.OKCYAN, thread_prefix, "DEBUG:: We found a pronunciation, but not under our language, so ignore")
+                pass
             else:
                 pronunciation_ul = pronunciation_id.find_next('ul')
 
@@ -403,7 +404,7 @@ def get_definition(num, words, pbar, mutex):
             with open(filename, 'a', encoding='utf-8') as file:
                 file.write(line + '\n')
         pbar.update(1)
-        #time.sleep(1)
+        gpbar.update(1)
     return 0
 
 
@@ -433,28 +434,41 @@ for i in range(1, len(sys.argv)):
 
 
 startup()
-
 # Open our file to append to
 filename = str.lower(language) + '_' + str.lower(pos) + '_' + time_str()
+audio_dir = str.lower(language) + '_' + str.lower(pos) + "_audio_" + time_str()
 log_filename = filename + "_log.txt"
 filename = filename + ".txt"
 # split words into equal chunks
 chunk_size = math.ceil(len(words) / number_of_threads)
 words_chunks = []
 progress_bars = []
+thread_prefix = "0: "
 
 # Construct progress bars and create words chunks
 for i in range(0, len(words), chunk_size):
-    words_chunks.append(words[i:i+chunk_size])
-    if i+chunk_size > len(words):
-        chunk_size -= ((i+chunk_size)-len(words))
-    progress_bars.append(tqdm(desc=str(int(i/chunk_size)+1)+": ", total=chunk_size, unit='w', delay=1))
+    end_pos = i+chunk_size
+    words_chunks.append(words[i:end_pos])
+    progress_bars.append(tqdm(  desc=str(int(i/chunk_size)+1)+": ",\
+                                total=(chunk_size if (end_pos <= len(words)) else (chunk_size-(end_pos-len(words)))),\
+                                unit='w', delay=0.2, miniters=1))
+
+# Global bar only updates every 1s, shows average
+global_progress = tqdm(desc="Total Progress: ", total=len(words), unit='w', colour="cyan", mininterval=1, delay=0.5, smoothing=0)
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_threads) as executor:
-    futures = {executor.submit(get_definition, i+1, words_chunk, progress_bars[i], mutex) for i, words_chunk in enumerate(words_chunks)}
-    for future in concurrent.futures.as_completed(futures):
-        try:
-            log(bcolors.OKCYAN, "0: " , f"DEBUG:: Task returned: {future.result()} for thread{i+1}")
-        except Exception as e:
-            log(bcolors.FAIL, "0: ", f"ERROR:: An error occurred in the future: {e}")
-            traceback.print_exc()
+    futures = {executor.submit(get_definition, i+1, words_chunk, global_progress, progress_bars[i], mutex) for i, words_chunk in enumerate(words_chunks)}
+    try:
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                log(bcolors.OKCYAN, thread_prefix, f"DEBUG:: Task returned: {future.result()}")
+            except Exception as e:
+                log(bcolors.FAIL, thread_prefix, "ERROR:: An error occurred in the future: " + traceback.format_exc())
+                print(bcolors.FAIL + thread_prefix + "ERROR:: An error occurred in the future: " + bcolors.ENDC + traceback.format_exc())
+    except Exception as e:
+        log(bcolors.FAIL, thread_prefix, "ERROR:: An error occurred during execution: " + traceback.format_exc())
+        print(bcolors.FAIL + thread_prefix + "ERROR:: An error occurred during execution: " + bcolors.ENDC + traceback.format_exc())
+    # except KeyboardInterrupt:
+    #     log(bcolors.FAIL, thread_prefix, "KeyboardInterrupt, Exiting...")
+    #     print(bcolors.FAIL + thread_prefix + "KeyboardInterrupt, Exiting..." + bcolors.ENDC)
+    #     exit(1)
