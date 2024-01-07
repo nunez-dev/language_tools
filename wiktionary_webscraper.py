@@ -64,6 +64,8 @@ headers = {'User-Agent': 'Wiktionary_webscraper_bot/0.0 (https://github.com/nune
 colored_log = 0
 language = ""
 pos = ""
+pos_with_spaces = ""
+custom_heading = ""
 
 mutex = threading.Lock() # For writing to wordlist
 log_mutex = threading.Lock() # For writing to log
@@ -94,7 +96,7 @@ def startup():
     total_words = 0
     done = 0
     count = 0
-    global number_of_threads, language, pos, words, ipa_pattern
+    global number_of_threads, language, pos, pos_with_spaces, words, ipa_pattern, custom_heading
     while(True):
         try:
             raw_in = input("How many threads (default:10)? ")
@@ -122,7 +124,10 @@ def startup():
     while(not page):
         
         language = input("What language? (Case sensitive) ")
+        language_with_spaces = language.replace('_', ' ')
         pos = str.lower(input("What part of speech/lemma?\n(See %s_lemmas) " % (words_url + language)))
+        pos_with_spaces = pos.replace('_', ' ')
+        custom_heading = input("A custom header to look under on the definition page? (Blank for default, which is the just lemma name) ")
 
         final_words_url = words_url + language + '_' + pos
         print(final_words_url + '\n')
@@ -149,7 +154,7 @@ def startup():
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Try find the sub heading of interest ' Pages in category "Spanish verbs" '
-        h2 = soup.find('h2', string=f"Pages in category \"{language.replace('_', ' ')} {pos}\"")
+        h2 = soup.find('h2', string=f"Pages in category \"{language_with_spaces} {pos_with_spaces}\"")
 
         # Find total words (if we haven't already)
         if(not total_words):
@@ -244,7 +249,7 @@ def get_definition(num, words, gpbar, pbar, mutex):
                 good_response = 1
             elif response.status_code == 429:
                 slowdown += 25/1000
-                log(bcolors.WARNING, thread_prefix, "WARN:: Told to slow down, setting slowdown=" + str(slowdown) + "s" + bcolors.ENDC)
+                log(bcolors.WARNING, thread_prefix, "WARN:: Told to slow down, setting slowdown=" + str(slowdown) + "s")
             else:
                 debug_filename = "wiktionary_webscraper_" + time_str() + ".html"
                 log(bcolors.FAIL, thread_prefix, "ERROR:: See " + debug_filename + ". No good response from url? " + url + bcolors.ENDC)
@@ -344,10 +349,14 @@ def get_definition(num, words, gpbar, pbar, mutex):
                             f.write(audio_received.content)
 
         # Now the definition
-        pos_without_s = str.capitalize(pos[:-1]) # This just strips last letter e.g: Verbs to Verb
-        pos_id = language_id.find_next('span', id=re.compile(pos_without_s + r".*")) # Sometimes it is Verb_3
+        if (custom_heading == ""):
+            heading_match = str.capitalize(pos_with_spaces[:-1]) # This just strips last letter e.g: Verbs to Verb
+        else:
+            heading_match = str.capitalize(custom_heading)
+
+        pos_id = language_id.find_next('span', id=re.compile(heading_match + r".*")) # Sometimes it is Verb_3
         if not(pos_id):
-            log(bcolors.FAIL, thread_prefix, "ERROR:: No definition found for " + word + " looking under " + pos_without_s)
+            log(bcolors.FAIL, thread_prefix, "ERROR:: No definition found for " + word + " looking under " + heading_match)
             continue # Go onto next word
         # Again make sure it's under our language
         if(check_language(pos_id, other_language)):
