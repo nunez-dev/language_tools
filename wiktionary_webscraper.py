@@ -232,6 +232,14 @@ def check_language(node, permissable):
         return 1
     return 0
 
+# Used to make sure the ul we are looking at is under pronunciation
+def check_pronunciation(node):
+    previous_h3 = node.find_previous('h3')
+    previous_heading = previous_h3.find_next('span', class_="mw-headline")
+    if(previous_heading["id"] != "Pronunciation"):
+        return 1
+    return 0
+
 def get_definition(num, words, gpbar, pbar, mutex):
     with mutex:
         print(bcolors.OKCYAN + "Starting thread " + str(num) + " for words from " + words[0] + " to " + words[len(words)-1] + bcolors.ENDC)
@@ -287,66 +295,67 @@ def get_definition(num, words, gpbar, pbar, mutex):
                 # log(bcolors.OKCYAN, thread_prefix, "DEBUG:: We found a pronunciation, but not under our language, so ignore")
                 pass
             else:
-                pronunciation_ul = pronunciation_id.find_next('ul')
+                for pronunciation_ul in pronunciation_id.find_all_next('ul'):
+                    if(check_language(pronunciation_ul, other_language) or check_pronunciation(pronunciation_ul)):
+                        break
 
-                # We get the first IPA we can and store it
-                # Then if there is a square bracket one, store that instead,
-                # Just sit with the first IPA until we encounter something better, so if we encounter nothing better we have the top of the list
-                # If geos are enabled, add the correct geo one. After, we get from the "ipa" variable, which represents our best find
-                for pronunciation_item in pronunciation_ul.find_all('li'):
+                    # We get the first IPA we can and store it
+                    # Then if there is a square bracket one, store that instead,
+                    # Just sit with the first IPA until we encounter something better, so if we encounter nothing better we have the top of the list
+                    # If geos are enabled, add the correct geo one. After, we get from the "ipa" variable, which represents our best find
+                    for pronunciation_item in pronunciation_ul.find_all('li'):
+                        # Just get the first one so we have something
+                        ipa_span = pronunciation_item.find_next('span', class_="IPA", string=re.compile(r"\/.*\/"))
+                        if(ipa_span and not ipa_phonemic):
+                            ipa = ipa_span.text
+                            ipa_phonemic = 1 # So we don't override on later ones
 
-                    # Just get the first one so we have something
-                    ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\/.*\/"))
-                    if(ipa_span and not ipa_phonemic):
-                        ipa = ipa_span.text
-                        ipa_phonemic = 1 # So we don't override on later ones
+                        # Now we are only matching IPAs with square brackets because of string param
+                        ipa_span = pronunciation_item.find_next('span', class_="IPA", string=re.compile(r"\[.*\]"))
+                        if(ipa_span and not ipa_phonetic):
+                            ipa = ipa_span.text
+                            ipa_phonetic = 1
 
-                    # Now we are only matching IPAs with square brackets because of string param
-                    ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\[.*\]"))
-                    if(ipa_span and not ipa_phonetic):
-                        ipa = ipa_span.text
-                        ipa_phonetic = 1
+                        # For each IPA list item
+                        # See if it has brackets at the front with the geography, like (Latin America)
+                        
+                        geo = pronunciation_item.find_next('span', class_="ib-content qualifier-content")
+                        if(geo):
+                            # See if it matches our pattern if we have one
+                            if (ipa_pattern != ""):
+                                match = re.search(ipa_pattern, geo.text)
+                                if(match):
+                                    # log(bcolors.OKCYAN, thread_prefix, "DEBUG:: IPA Match for " + word + ": " + geo.text)
+                                    # Great, use this line
+                                    ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\/.*\/"))
+                                    if(ipa_span):
+                                        ipa = ipa_span.text
 
-                    # For each IPA list item
-                    # See if it has brackets at the front with the geography, like (Latin America)
-                    
-                    geo = pronunciation_item.find('span', class_="ib-content qualifier-content")
-                    if(geo):
-                        # See if it matches our pattern if we have one
-                        if (ipa_pattern != ""):
-                            match = re.search(ipa_pattern, geo.text)
-                            if(match):
-                                log(bcolors.OKCYAN, thread_prefix, "DEBUG:: IPA Match for " + word + ": " + geo.text)
-                                # Great, use this line
-                                ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\/.*\/"))
-                                if(ipa_span):
-                                    ipa = ipa_span.text
+                                    ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\[.*\]"))
+                                    if(ipa_span):
+                                        ipa = ipa_span.text
+                                
+                                # If there is no match, we will end up trying again on the next line (line as in line on the webpage)
 
-                                ipa_span = pronunciation_item.find('span', class_="IPA", string=re.compile(r"\[.*\]"))
-                                if(ipa_span):
-                                    ipa = ipa_span.text
-                            
-                            # If there is no match, we will end up trying again on the next line (line as in line on the webpage)
-
-                    # Now the audio, still under the Pronunciation header
-                    audio = pronunciation_item.find('audio')
-                    if(audio):
-                        audio_filename = audio["data-mwtitle"]
-                        audio_path = audio_dir + '/' + audio_filename
-                        # examples of src attribute
-                        # //upload.wikimedia.org/wikipedia/commons/transcoded/a/ad/LL-Q1321_%28spa%29-Millars-perra.wav/LL-Q1321_%28spa%29-Millars-perra.wav.mp3
-                        # or
-                        # //upload.wikimedia.org/wikipedia/commons/a/ad/LL-Q1321_%28spa%29-Millars-perra.wav
-                        # You can see the transcoded version as well, which we aren't considering
-                        # src attribute from last source tag, looked like it was the original source not transcoded
-                        audio_url = "http://" + audio.find_all('source')[-1]["src"][2:]
-                        audio_received = download_page(audio_url)
-                        if (audio_received.status_code != 200):
-                            log(bcolors.FAIL, thread_prefix, "ERROR:: " + audio_url + '\n' + str(audio_received.status_code))
-                        if not os.path.exists(audio_dir):
-                            os.makedirs(audio_dir)
-                        with open(audio_path, 'wb') as f:
-                            f.write(audio_received.content)
+                        # Now the audio, still under the Pronunciation header
+                        audio = pronunciation_item.find_next('audio')
+                        if(audio):
+                            audio_filename = audio["data-mwtitle"]
+                            audio_path = audio_dir + '/' + audio_filename
+                            # examples of src attribute
+                            # //upload.wikimedia.org/wikipedia/commons/transcoded/a/ad/LL-Q1321_%28spa%29-Millars-perra.wav/LL-Q1321_%28spa%29-Millars-perra.wav.mp3
+                            # or
+                            # //upload.wikimedia.org/wikipedia/commons/a/ad/LL-Q1321_%28spa%29-Millars-perra.wav
+                            # You can see the transcoded version as well, which we aren't considering
+                            # src attribute from last source tag, looked like it was the original source not transcoded
+                            audio_url = "http://" + audio.find_all('source')[-1]["src"][2:]
+                            audio_received = download_page(audio_url)
+                            if (audio_received.status_code != 200):
+                                log(bcolors.FAIL, thread_prefix, "ERROR:: " + audio_url + '\n' + str(audio_received.status_code))
+                            if not os.path.exists(audio_dir):
+                                os.makedirs(audio_dir)
+                            with open(audio_path, 'wb') as f:
+                                f.write(audio_received.content)
 
         # Now the definition
         if (custom_heading == ""):
