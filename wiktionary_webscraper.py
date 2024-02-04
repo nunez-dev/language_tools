@@ -372,6 +372,10 @@ def get_definition(num, words, gpbar, pbar, mutex):
             log(bcolors.OKCYAN, thread_prefix, "DEBUG:: We found a definition, but not under our language, so ignore")
             # Idk when this would ever happen, would require there to be no definition for our language (but still a language header)
         else:
+            # Grab the word in case it is different to the url word. Sometimes the url doesn't have diacritics.
+            word_line = pos_id.find_next('span', class_="headword-line")
+            word = word_line.find_next('strong').text
+
             # Find the next ordered list
             pos_def = pos_id.find_next('ol')
             defs=[]
