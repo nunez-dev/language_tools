@@ -16,10 +16,10 @@ mkdir -p ./rand/
 
 # get metadata
 grep '^#' $1 > ./rand/meta.txt
+file=${1}_processed
 sed -i '/^#.*/d' $file
 
 # preprocessing, remove heading on each card
-file=${1}_processed
 sed 's/\"<.*/\"<div><\/div>/g' $1 > $file
 
 # 1st pass to find out how many entries
@@ -80,8 +80,8 @@ do
     fi
 done < <(cat ./rand/[0-9]*)
 
-for file in ./${2}_output/*; do
-    echo -e "$(cat ./rand/meta.txt)\n$(cat $file)" > $file
+for local_file in ./${2}_output/*; do
+    echo -e "$(cat ./rand/meta.txt)\n$(cat $local_file)" > $local_file
 done
 
 echo "Done in ./${2}_output"
