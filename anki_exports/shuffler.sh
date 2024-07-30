@@ -1,42 +1,54 @@
 #!/bin/bash
 
 # Usage ./shuffler.sh Everythingburger.txt viet
-# seperator is 5 spaces, dodgy
-sep=$(perl -e 'print " " x 5')
+sep='"'
 
 total_entries=0
 chunk_size=0
-current_entry_buffer=""
+current_entry_buffer=''
 MONTHS=(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)
 
 current_entry=1
 current_chunk=1
-# 1st pass to find out how many entries 
+
+rm -r ./rand
+mkdir -p ./rand/
+
+# get metadata
+grep '^#' $1 > ./rand/meta.txt
+sed -i '/^#.*/d' $file
+
+# preprocessing, remove heading on each card
+file=${1}_processed
+sed 's/\"<.*/\"<div><\/div>/g' $1 > $file
+
+# 1st pass to find out how many entries
 while IFS="" read -r p || [ -n "$p" ]
 do
     if [ "$p" = "${sep}" ]; then
-        # tab encountered, update
+        # sep encountered, update
         total_entries=$((total_entries+1))
     fi
-done < $1
+done < $file
 
 # 2nd pass randomise in ./rand/
-# Done by writing to 1 file per entry with filename equal to random number [1,total_entries]
+# Done by writing to 1 file per entry with filename equal to random number [0,total_entries-1]
 # entries are multiline, distinguished by a single 5 space line
-mkdir -p ./rand/
 random_order=( $(shuf -i 1-"${total_entries}") )
 while IFS="" read -r p || [ -n "$p" ]
 do
     if [ "$p" = "${sep}" ]; then
-        entry_filename=./rand/"${random_order[$current_entry]}"
+        current_entry_buffer=$(echo -e "${current_entry_buffer}\n${p}")
+        entry_filename=./rand/"${random_order[$current_entry-1]}"
         echo "${entry_filename}"
         echo "${current_entry_buffer}" > "${entry_filename}"
-        current_entry_buffer=""
+        current_entry_buffer=''
         current_entry=$(($current_entry+1))
+    else
+        # below command is extremely slow
+        current_entry_buffer=$(echo -e "${current_entry_buffer}\n${p}")
     fi
-    # below command is extremely slow
-    current_entry_buffer=$(echo -e "${current_entry_buffer}\n${p}")
-done < $1
+done < $file
 
 current_entry=1 # reset
 
@@ -47,10 +59,12 @@ echo "total_entries: $total_entries"
 chunk_size=$((total_entries/12))
 echo "chunk_size: $chunk_size"
 
+rm -r ./${2}_output
+mkdir -p ./${2}_output
 while IFS="" read -r p || [ -n "$p" ]
 do
     month_index=$(($current_chunk-1))
-    echo "$p" >> "./${2}_${MONTHS[$month_index]}.txt"
+    echo "$p" >> "./${2}_output/${month_index}_${2}_${MONTHS[$month_index]}.txt"
     if [ "$p" = "${sep}" ]; then
         # tab encountered, update
         if [ $(($current_entry % $chunk_size)) == 0 ]; then
@@ -64,7 +78,12 @@ do
         fi
         current_entry=$(($current_entry+1))
     fi
-done < <(cat ./rand/*)
+done < <(cat ./rand/[0-9]*)
 
-echo "Done"
+for file in ./${2}_output/*; do
+    echo -e "$(cat ./rand/meta.txt)\n$(cat $file)" > $file
+done
+
+echo "Done in ./${2}_output"
+rm $file
 rm -r ./rand
